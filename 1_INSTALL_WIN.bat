@@ -40,7 +40,7 @@ echo 🚀 연구소를 실행합니다...
 where code >nul 2>nul
 if %errorlevel% neq 0 (
     echo ⚠️ Antigravity/VSCode가 없습니다.
-    start https://antigravity.ai
+    start https://antigravity.google
     pause
 )
 
