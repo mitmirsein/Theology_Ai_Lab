@@ -29,17 +29,33 @@ class ResearcherAgent:
         self._init_chroma()
 
     def _discover_db_path(self):
-        script_dir = Path(__file__).parent.parent
-        rel_path = script_dir.parent / "Theology_Project.nosync" / "vector_db"
-        if rel_path.exists():
-            return str(rel_path.absolute())
+        # 03_System/agents/researcher.py -> 03_System -> Theology_AI_Lab
+        script_dir = Path(__file__).resolve().parent
+        kit_root = script_dir.parent.parent
+        
+        # Priority 1: Check Env Var (Standard)
+        if os.environ.get("CHROMA_DB_DIR"):
+            return os.environ.get("CHROMA_DB_DIR")
+
+        # Priority 2: Local Kit Structure
+        local_db = kit_root / "02_Brain" / "vector_db"
+        if local_db.exists():
+            return str(local_db)
+            
+        # Fallback: Legacy (Keep for compatibility if needed, or remove)
         return "/Users/msn/Desktop/MS_Dev.nosync/data/Theology_Project.nosync/vector_db"
 
     def _discover_archive_path(self):
-        script_dir = Path(__file__).parent.parent
-        rel_path = script_dir.parent / "Theology_Project.nosync" / "archive"
-        if rel_path.exists():
-            return rel_path
+        script_dir = Path(__file__).resolve().parent
+        kit_root = script_dir.parent.parent
+        
+        if os.environ.get("ARCHIVE_DIR"):
+             return Path(os.environ.get("ARCHIVE_DIR"))
+
+        local_archive = kit_root / "01_Library" / "archive"
+        if local_archive.exists():
+            return local_archive
+            
         return Path("/Users/msn/Desktop/MS_Dev.nosync/data/Theology_Project.nosync/archive")
 
     def _init_chroma(self):

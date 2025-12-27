@@ -170,5 +170,79 @@ def get_db_stats() -> str:
     return f"📚 Theology Library\n- 총 문서 수: {count}개\n- 경로: {DB_PATH}"
 
 
+@mcp.tool()
+def list_documents() -> str:
+    """
+    서재(Archive)에 있는 문서 목록 확인.
+    
+    Returns:
+        보관된 문서 파일명 목록
+    """
+    archive_dir = os.path.join(kit_root, "01_Library", "archive")
+    if not os.path.exists(archive_dir):
+        return "보관된 문서가 없습니다."
+        
+    files = [f for f in os.listdir(archive_dir) if f.endswith('.json') and not f.startswith('lemma_')]
+    if not files:
+        return "보관된 문서가 없습니다."
+        
+    file_list = "\n".join([f"- {f.replace('.json', '')}" for f in files])
+    return f"📚 서재 목록 ({len(files)}권):\n{file_list}"
+
+
+import subprocess
+import sys
+
+# ... (existing imports)
+
+# ... (existing code)
+
+@mcp.tool()
+def update_library() -> str:
+    """
+    서재(Archive) 업데이트 및 재색인.
+    Inbox에 있는 새 파일을 처리하고 DB를 갱신합니다.
+    
+    Returns:
+        작업 수행 결과 메시지
+    """
+    print("🚀 서재 업데이트 시작 (AI 요청)")
+    
+    # 실행할 스크립트 목록 (순서 중요)
+    scripts = [
+        # 1. PDF Processor
+        [sys.executable, os.path.join(kit_root, "03_System", "utils", "local_pdf_processor.py"), os.path.join(kit_root, "01_Library", "inbox"), "-o", os.path.join(kit_root, "01_Library", "inbox")],
+        # 2. DB Builder
+        [sys.executable, os.path.join(kit_root, "03_System", "utils", "db_builder.py")],
+        # 3. Lemma Indexer
+        [sys.executable, os.path.join(kit_root, "03_System", "tools", "build_lemma_index.py")]
+    ]
+    
+    results = []
+    
+    try:
+        # 1. PDF Processing
+        proc = subprocess.run(scripts[0], capture_output=True, text=True)
+        if proc.returncode != 0:
+            return f"❌ PDF 변환 실패:\n{proc.stderr}"
+        results.append("✅ PDF 변환 완료")
+        
+        # 2. DB Building
+        proc = subprocess.run(scripts[1], capture_output=True, text=True)
+        if proc.returncode != 0:
+            return f"❌ DB 색인 실패:\n{proc.stderr}"
+        results.append("✅ DB 색인 완료")
+        
+        # 3. Lemma Indexing
+        proc = subprocess.run(scripts[2], capture_output=True, text=True)
+        if proc.returncode != 0:
+            return f"❌ 인덱스 생성 실패:\n{proc.stderr}"
+        results.append("✅ 인덱스 생성 완료")
+        
+        return "🎉 서재 업데이트가 완료되었습니다!\n" + "\n".join(results)
+        
+    except Exception as e:
+        return f"❌ 시스템 오류: {str(e)}"
+
 if __name__ == "__main__":
     mcp.run()

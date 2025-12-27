@@ -63,12 +63,20 @@ except ImportError:
 
 def discover_archive_path() -> Path:
     """아카이브 경로를 스마트하게 탐지"""
-    # tools/build_lemma_index.py -> ... -> data/Theology_Project.nosync/archive
+    # tools/build_lemma_index.py -> 03_System -> Theology_AI_Lab (Root)
     script_dir = Path(__file__).parent.absolute()
-    rel_path = script_dir.parent.parent.parent / "data" / "Theology_Project.nosync" / "archive"
-    if rel_path.exists():
-        return rel_path.resolve()
+    kit_root = script_dir.parent.parent 
+    
+    # Priority 1: Env Var
+    if os.environ.get("ARCHIVE_DIR"):
+        return Path(os.environ.get("ARCHIVE_DIR"))
+
+    # Priority 2: Standard Kit Path
+    local_archive = kit_root / "01_Library" / "archive"
+    if local_archive.exists():
+        return local_archive.resolve()
         
+    # Fallback
     return Path.home() / "Desktop/MS_Brain.nosync/300 Tech/320 Coding/Projects.nosync/Theology_Project.nosync/archive"
 
 ARCHIVE_PATH = discover_archive_path()

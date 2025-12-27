@@ -528,56 +528,47 @@ def main():
     
     print(f"📂 발견된 파일: {len(input_files)}개\n")
     
-    # PDF 처리
-    all_chunks_by_source = defaultdict(list)
-    total_chunks = 0
-    
+    # PDF 처리 및 JSON 저장
+    print("=" * 60)
+    print("🚀 PDF 처리 및 JSON 변환 시작")
+    print("=" * 60)
+
     for i, input_file in enumerate(input_files, 1):
-        print(f"[{i}/{len(input_files)}]")
+        filename = input_file.name
+        print(f"\n[{i}/{len(input_files)}] 📄 {filename}")
+        
         try:
             chunks = process_file(str(input_file), text_splitter, args.page_offset, args.double_page)
             
             if chunks:
-                # 소스별 그룹화
-                source = chunks[0]['metadata']['source']
-                volume = chunks[0]['metadata'].get('volume')
+                # 출력 파일명 결정 (입력 파일명 유지)
+                output_filename = input_file.stem + ".json"
+                output_file = output_dir / output_filename
                 
-                if volume:
-                    source_key = f"{source}_Bd{volume}"
-                else:
-                    source_key = source
+                # 메타데이터 정제 (None 제거)
+                for chunk in chunks:
+                    clean_meta = {
+                        k: (v if v is not None else "")
+                        for k, v in chunk['metadata'].items()
+                    }
+                    chunk['metadata'] = clean_meta
+
+                # JSON 저장
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    # DB Builder가 기대하는 포맷: list of dicts, or dict with 'chunks' list
+                    # 여기서는 list of dicts로 저장
+                    f.write(json.dumps(chunks, ensure_ascii=False, indent=2))
                 
-                all_chunks_by_source[source_key].extend(chunks)
-                total_chunks += len(chunks)
-        
+                print(f"   💾 저장 완료: {output_filename}")
+                print(f"   📊 청크 수: {len(chunks):,}개")
+
         except Exception as e:
             print(f"      ❌ 오류: {e}")
-        
-        print()
-    
-    # JSON 저장
-    print("=" * 60)
-    print(f"💾 JSON 저장 중... (총 {total_chunks:,}개 청크)")
-    print("=" * 60)
-    print()
-    
-    for source_key, chunks in all_chunks_by_source.items():
-        output_file = output_dir / f"{source_key}.json"
-        
-        with open(output_file, 'w', encoding='utf-8') as f:
-            for chunk in chunks:
-                # None 값 제거
-                clean_meta = {
-                    k: (v if v is not None else "")
-                    for k, v in chunk['metadata'].items()
-                }
-                chunk['metadata'] = clean_meta
-                
-                f.write(json.dumps(chunk, ensure_ascii=False) + '\n')
-        
-        file_size = output_file.stat().st_size / (1024 * 1024)
-        print(f"✅ {source_key}.json")
-        print(f"   {len(chunks):,}개 청크, {file_size:.1f}MB")
+            import traceback
+            traceback.print_exc()
+
+    print("\n" + "=" * 60)
+    print("🎉 변환 완료!")
     
     print("\n" + "=" * 60)
     print("🎉 완료!")

@@ -45,5 +45,8 @@ if ! command -v code &> /dev/null; then
     read -p "설치 후 엔터를 누르면 연구소가 열립니다..."
 fi
 
-# Fallback: Open folder directly to avoid workspace issues
-open .
+# Launch Workspace
+echo "📂 Theology_Lab 워크스페이스를 엽니다..."
+# Try opening the workspace file (associates with Antigravity/VSCode)
+open Theology_Lab.code-workspace || open .
+read -p "엔터를 누르면 창을 닫습니다..."
