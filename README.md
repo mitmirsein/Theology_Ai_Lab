@@ -1,7 +1,7 @@
 # 📖 Theology AI Lab: 사용자 매뉴얼 (User Guide)
 
 > **"내 컴퓨터에 신학 연구소를 차리다."**
-> Theology AI Lab은 인공지능(Antigravity)과 함께 신학 원전을 연구할 수 있는 개인용 디지털 서재입니다.
+> Theology AI Lab은 인공지능(Antigravity)과 함께 **내가 가진 신학책을 마음껏 연구할 수 있는** 개인용 디지털 서재입니다.
 
 ---
 
