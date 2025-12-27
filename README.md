@@ -8,7 +8,7 @@
 ## 0. 🛠️ 준비물 (Prerequisites)
 
 이 키트를 사용하려면 **Antigravity (또는 VS Code)** 가 먼저 설치되어 있어야 합니다.
-*   아직 없다면? 👉 [다운로드 페이지로 가기](https://antigravity.ai)
+*   아직 없다면? 👉 [다운로드 페이지로 가기](https://antigravity.google)
 
 ---
 
