@@ -43,7 +43,10 @@ class ResearcherAgent:
             return str(local_db)
             
         # Fallback: Legacy (Keep for compatibility if needed, or remove)
-        return "/Users/msn/Desktop/MS_Dev.nosync/data/Theology_Project.nosync/vector_db"
+        # Dynamic path relative to kit root (assuming script is in 03_System/agents)
+        kit_root = Path(__file__).parent.parent.parent
+        db_path = kit_root / "02_Brain" / "vector_db"
+        return str(db_path.resolve())
 
     def _discover_archive_path(self):
         script_dir = Path(__file__).resolve().parent
@@ -56,7 +59,9 @@ class ResearcherAgent:
         if local_archive.exists():
             return local_archive
             
-        return Path("/Users/msn/Desktop/MS_Dev.nosync/data/Theology_Project.nosync/archive")
+        kit_root = Path(__file__).parent.parent.parent
+        archive_path = kit_root / "01_Library" / "archive"
+        return archive_path.resolve()
 
     def _init_chroma(self):
         if os.path.exists(self.db_path):

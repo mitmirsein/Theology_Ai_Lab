@@ -574,7 +574,7 @@ def main():
     print("🎉 완료!")
     print("=" * 60)
     print(f"\n다음 단계:")
-    print(f"  cd /Users/msn/Desktop/project/theology-vector-db")
+    print(f"  cd .")
     print(f"  source venv.nosync/bin/activate")
     print(f"  python db_builder.py")
 

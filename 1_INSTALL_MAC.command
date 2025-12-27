@@ -10,8 +10,8 @@ echo "📦 Theology AI Lab 설치를 시작합니다..."
 # 1. Check Python 3.11 (Robust Loop)
 while ! command -v python3.11 &> /dev/null; do
     echo "❌ Python 3.11이 감지되지 않습니다."
-    echo "👉 다운로드 페이지를 엽니다: https://www.python.org/downloads/"
-    open "https://www.python.org/downloads/"
+    echo "👉 다운로드 페이지를 엽니다: https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg"
+    open "https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg"
     echo "⚠️  설치를 완료한 후, 터미널을 껐다가 다시 실행해야 할 수도 있습니다."
     read -p "설치가 완료되었다면 엔터를 눌러주세요 (재확인합니다)..."
 done
