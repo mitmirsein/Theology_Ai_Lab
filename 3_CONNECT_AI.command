@@ -1,7 +1,7 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 
-echo "📡 Theology AI Server를 시작합니다..."
+echo "🔗 신학 연구 AI와 연결합니다..."
 echo "🔗 Antigravity와 연결 대기 중..."
 
 source 03_System/venv/bin/activate
