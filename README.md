@@ -14,7 +14,20 @@
 
 ## 1. 🚀 설치 및 시작 (Installation)
 
-1.  **압축 해제:** `Theology_AI_Lab.zip`을 원하는 곳(예: 바탕화면)에 풉니다.
+### ⚡️ 1. 빠른 설치 (Quick Install with AI)
+**가장 추천하는 방법입니다.** Antigravity 채팅창에 아래 문장을 복사해서 붙여넣으세요.
+
+> **"github.com/mitmirsein/Theology_Ai_Lab.git 이 주소 복제해서 설치해줘."**
+
+1.  AI가 설치를 마치면, 폴더 안에 생긴 `Theology_Lab.code-workspace` 파일을 엽니다.
+2.  끝입니다! 바로 연구를 시작하세요.
+
+---
+
+### 📦 2. 수동 설치 (Manual Install)
+AI 설치가 어렵다면, 전통적인 방법으로 설치할 수 있습니다.
+
+1.  **다운로드:** `Theology_AI_Lab.zip`을 받아 원하는 곳에 압축을 풉니다.
 2.  **설치 (OS에 맞는 파일 실행):**
     *   🍎 **Mac:** `1_INSTALL_MAC.command`
     *   🪟 **Windows:** `1_INSTALL_WIN.bat`
