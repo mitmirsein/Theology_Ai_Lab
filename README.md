@@ -104,4 +104,4 @@ AI 설치가 어렵다면, 전통적인 방법으로 설치할 수 있습니다.
 > **☕️ Theology AI Lab이 유익하셨나요?**  
 > 책 한 권 구입으로 커피 한 잔을 선물해 주세요. 여러분의 연구를 응원합니다!
 > 
-> **Made by [케리그마출판사](https://www.kerygma.co.kr)** -> **Made by <a href="https://www.kerygma.co.kr" target="_blank">케리그마출판사</a>**
+> **Made by <a href="https://www.kerygma.co.kr" target="_blank">케리그마출판사</a>**
