@@ -8,7 +8,7 @@
 ## 0. 🛠️ 준비물 (Prerequisites)
 
 이 키트를 사용하려면 **Antigravity (또는 VS Code)** 가 먼저 설치되어 있어야 합니다.
-*   아직 없다면? 👉 <a href="https://antigravity.google" target="_blank">다운로드 페이지로 가기</a>
+*   아직 없다면? 👉 [다운로드 페이지로 가기](https://antigravity.google)
 
 ---
 
@@ -104,4 +104,4 @@ AI 설치가 어렵다면, 전통적인 방법으로 설치할 수 있습니다.
 > **☕️ Theology AI Lab이 유익하셨나요?**  
 > 책 한 권 구입으로 커피 한 잔을 선물해 주세요. 여러분의 연구를 응원합니다!
 > 
-> **Made by <a href="https://www.kerygma.co.kr" target="_blank">케리그마출판사</a>**
+> **Made by [케리그마출판사](https://www.kerygma.co.kr)**
