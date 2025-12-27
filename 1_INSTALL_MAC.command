@@ -41,7 +41,7 @@ echo "🚀 연구소를 실행합니다..."
 if ! command -v code &> /dev/null; then
     echo "⚠️  Antigravity (또는 VS Code)가 없습니다."
     echo "👉 설치 페이지를 엽니다..."
-    open "https://code.visualstudio.com"
+    open "https://antigravity.ai"
     read -p "설치 후 엔터를 누르면 연구소가 열립니다..."
 fi
 
