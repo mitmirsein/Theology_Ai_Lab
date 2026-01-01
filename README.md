@@ -62,10 +62,11 @@ zip 압축 해제 후 AI에게 요청:
 
 ## 📚 상세 문서
 
-설치 후 폴더 내 문서 참조:
-- `QUICKSTART.md` - 빠른 시작
-- `USAGE.md` - 상세 사용법
-- `docs/` - 추가 가이드
+설치 후 `docs/` 폴더 내 문서 참조:
+- `docs/QUICKSTART.md` - 빠른 시작
+- `docs/USAGE.md` - 상세 사용법
+- `docs/GUI_GUIDE.md` - Web GUI 가이드
+- `docs/OBSIDIAN_INTEGRATION.md` - 옵시디언 연동
 
 ---
 
