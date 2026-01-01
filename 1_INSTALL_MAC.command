@@ -42,19 +42,15 @@ ARCHIVE_DIR=./01_Library/archive
 INBOX_DIR=./01_Library/inbox
 EOL
 
-# 5. Check IDE & Launch
-echo "✅ 설치 완료!"
-echo "🚀 연구소를 실행합니다..."
+# 5. Complete & Launch App
+echo ""
+echo "✅ =========================================="
+echo "   설치가 완료되었습니다!"
+echo "============================================"
+echo ""
+echo "🚀 연구소를 바로 실행합니다..."
+echo "   (브라우저가 자동으로 열립니다)"
+echo ""
 
-if ! command -v code &> /dev/null; then
-    echo "⚠️  Antigravity (또는 VS Code)가 없습니다."
-    echo "👉 설치 페이지를 엽니다..."
-    open "https://antigravity.google"
-    read -p "설치 후 엔터를 누르면 연구소가 열립니다..."
-fi
-
-# Launch Workspace
-echo "📂 Theology_Lab 워크스페이스를 엽니다..."
-# Try opening the workspace file (associates with Antigravity/VSCode)
-open Theology_Lab.code-workspace || open .
-read -p "엔터를 누르면 창을 닫습니다..."
+# Launch the app directly
+./3_START_MAC.command

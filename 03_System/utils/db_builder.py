@@ -2,7 +2,7 @@
 """
 신학 벡터 DB 빌더 (M1 맥북용)
 - inbox/ 폴더의 JSON 파일을 ChromaDB로 벡터화
-- 처리 완료 시 archive/로 이동
+- 처리 완료 시 JSON은 archive/로 이동 (검색용)
 - 중복 실행 방지: 락 파일 사용
 """
 
@@ -141,10 +141,13 @@ def build_database():
                     meta['source'] = source_name
                     meta['indexed_at'] = datetime.now().isoformat()
                     
-                    # None 값 처리 (DB 오류 방지)
+                    # None 값 및 리스트 처리 (ChromaDB 호환성)
                     for k, v in list(meta.items()):
                         if v is None:
                             meta[k] = ""
+                        elif isinstance(v, list):
+                            # [v2.0] 리스트를 쉼표 구분 문자열로 변환
+                            meta[k] = ", ".join(str(item) for item in v)
                     
                     documents.append(item['text'])
                     ids.append(unique_id)
@@ -153,7 +156,7 @@ def build_database():
             # 배치 처리 (10개씩 - 사용자 피드백 반영)
             batch_size = 10
             total_chunks = len(documents)
-            print(f"   총 {total_chunks} 청크 벡터화 시작...")
+            print(f"   📊 총 {total_chunks} 청크 벡터화 시작...", flush=True)
 
             for i in range(0, total_chunks, batch_size):
                 batch_docs = documents[i : i + batch_size]
@@ -171,8 +174,10 @@ def build_database():
                     metadatas=batch_meta
                 )
                 
-                if (i + batch_size) % 100 == 0 or i + batch_size >= total_chunks:
-                    print(f"     ✅ {min(i + batch_size, total_chunks)} / {total_chunks} 완료")
+                # [v2.7.23] 진행률 표시 (매 배치마다)
+                processed = min(i + batch_size, total_chunks)
+                pct = int(processed / total_chunks * 100)
+                print(f"   🔄 벡터화: {processed}/{total_chunks} ({pct}%)", flush=True)
 
             # 완료된 파일 archive로 이동
             shutil.move(file_path, os.path.join(ARCHIVE_DIR, filename))

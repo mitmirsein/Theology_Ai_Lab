@@ -17,8 +17,10 @@ numpy>=1.26.0,<2.0
 # MCP (Antigravity Integration)
 mcp==1.24.0
 
-# Secretariat Agents
-google-genai==0.3.0
+# Secretariat Agents & AI API Clients
+anthropic>=0.40.0
+openai>=1.50.0
+google-genai>=1.0.0
 playwright==1.49.1
 pydantic>=2.11.0
 python-dotenv==1.0.1
@@ -27,3 +29,7 @@ python-dotenv==1.0.1
 pypdf==5.1.0
 langchain-text-splitters==0.3.4
 tiktoken==0.8.0
+
+# Utilities (EPUB Processing)
+ebooklib==0.18
+beautifulsoup4==4.12.3

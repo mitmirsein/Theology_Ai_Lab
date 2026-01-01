@@ -1,23 +1,45 @@
 #!/usr/bin/env python3
 """
-로컬 PDF 프로세서 - Theology Dictionary Indexing
+로컬 PDF 프로세서 - Theology Dictionary Indexing (v2.1)
 Colab 없이 로컬에서 PDF를 ChromaDB JSON으로 변환
 
 Features:
 - Volume/Lemma 자동 추출
 - 토큰 기반 스마트 청킹
 - ChromaDB 호환 JSON 출력
+- [v2.0] 확장 메타데이터 (category, language, related_lemmas)
+- [v2.1] 페이지 번호 자동 감지 (pdf_page vs print_page)
 """
 
 import os
 import re
 import json
+import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from collections import defaultdict
-import tiktoken
-from pypdf import PdfReader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None
+
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
+
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    RecursiveCharacterTextSplitter = None
+
+try:
+    from ebooklib import epub
+    from bs4 import BeautifulSoup
+    EPUB_AVAILABLE = True
+except ImportError:
+    EPUB_AVAILABLE = False
 
 # ═══════════════════════════════════════════════════════════════════
 # 설정
@@ -27,7 +49,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 DICTIONARY_ABBREVS = {
     "TDNT": "Theological Dictionary of the New Testament",
     "NIDNTT": "New International Dictionary of NT Theology",
-    "EDNT":" Exegetical Dictionary of the NT",
+    "EDNT": "Exegetical Dictionary of the NT",
     "ThWAT": "Theologisches Wörterbuch zum Alten Testament",
     "EWNT": "Exegetisches Wörterbuch zum Neuen Testament",
     "EKL": "Evangelisches Kirchenlexikon",
@@ -37,6 +59,98 @@ DICTIONARY_ABBREVS = {
     "Theologische": "TRE",
     "KD": "Kirchliche Dogmatik",
 }
+
+# ═══════════════════════════════════════════════════════════════════
+# [v2.0] 확장 메타데이터 유틸리티
+# ═══════════════════════════════════════════════════════════════════
+
+# 카테고리 추론 패턴
+CATEGORY_PATTERNS = {
+    "biblical_figures": r"(?:Abraham|Moses|David|Jesus|Paul|Paulus|Jakob|Isaak|Petrus|Johannes|Elijah|Elias)",
+    "systematic_theology": r"(?:Gnade|Rechtfertigung|Trinität|Sünde|Erlösung|Sakrament|Taufe|Abendmahl|Eschatologie)",
+    "church_history": r"(?:Luther|Calvin|Reformation|Konzil|Augustin|Barth|Schleiermacher|Kirchen(?:geschicht|väter))",
+    "philosophy": r"(?:Kant|Hegel|Aristoteles|Platon|Nietzsche|Heidegger|Philosophie|Metaphysik|Ontologie)",
+    "biblical_studies": r"(?:Exegese|Hermeneutik|Septuaginta|Pentateuch|Evangelium|Apostel|Propheten)",
+    "ethics": r"(?:Ethik|Moral|Tugend|Pflicht|Gewissen|Verantwortung)",
+    "practical_theology": r"(?:Predigt|Seelsorge|Liturgie|Gottesdienst|Gemeinde|Mission)",
+}
+
+
+def detect_language(text: str) -> str:
+    """
+    텍스트의 주요 언어 감지
+
+    Returns:
+        언어 코드: grc (그리스어), heb (히브리어), de (독일어), en (영어), unknown
+    """
+    # 그리스어 문자 확인
+    if re.search(r'[α-ωά-ώΑ-Ω]', text):
+        return "grc"
+    # 히브리어 문자 확인
+    if re.search(r'[א-ת]', text):
+        return "heb"
+    # 독일어 특성 단어
+    if re.search(r'\b(der|die|das|und|ist|nicht|auch|mit|für|von)\b', text, re.I):
+        return "de"
+    # 영어 특성 단어
+    if re.search(r'\b(the|and|is|of|to|in|that|for|with)\b', text, re.I):
+        return "en"
+    # 한국어 확인
+    if re.search(r'[가-힣]', text):
+        return "ko"
+    return "unknown"
+
+
+def extract_category(lemma: str, text: str) -> List[str]:
+    """
+    표제어와 내용에서 카테고리 추론
+
+    Args:
+        lemma: 표제어
+        text: 청크 텍스트
+
+    Returns:
+        카테고리 목록 (예: ["systematic_theology", "church_history"])
+    """
+    categories = []
+    search_text = f"{lemma or ''} {text[:500]}"
+
+    for cat, pattern in CATEGORY_PATTERNS.items():
+        if re.search(pattern, search_text, re.I):
+            categories.append(cat)
+
+    return categories if categories else ["general"]
+
+
+def extract_related_lemmas(text: str) -> List[str]:
+    """
+    텍스트에서 관련 표제어 추출
+
+    신학 사전의 참조 패턴:
+    - "→ Liebe"
+    - "siehe Glaube"
+    - "vgl. Hoffnung"
+    - "s. auch Gericht"
+    - "cf. Grace"
+
+    Returns:
+        관련 표제어 목록
+    """
+    patterns = [
+        # 독일어 참조
+        r'(?:→|siehe|vgl\.?|s\.(?:\s*auch)?|vergleiche)\s+([A-ZÄÖÜ][a-zäöüß]+)',
+        # 영어 참조
+        r'(?:cf\.?|see|see also|compare)\s+([A-Z][a-z]+)',
+        # 그리스어 참조 (대문자로 시작)
+        r'(?:→|cf\.?)\s+([Α-Ω][α-ω]+)',
+    ]
+
+    related = set()
+    for pattern in patterns:
+        matches = re.findall(pattern, text, re.I)
+        related.update(matches)
+
+    return list(related)[:10]  # 최대 10개
 
 # ═══════════════════════════════════════════════════════════════════
 # 유틸리티 함수
@@ -131,18 +245,179 @@ def extract_lemma(text: str) -> Optional[str]:
 # PDF 처리
 # ═══════════════════════════════════════════════════════════════════
 
-def process_file(file_path: str, text_splitter, page_offset: int = 0, double_page: bool = False) -> List[Dict[str, Any]]:
+def process_file(
+    file_path: str,
+    text_splitter,
+    page_offset: int = 0,
+    double_page: bool = False,
+    auto_detect_pages: bool = False,
+) -> List[Dict[str, Any]]:
     """
     파일(PDF 또는 TXT)을 처리하여 메타데이터가 포함된 청크 리스트 반환
+
+    Args:
+        file_path: 입력 파일 경로
+        text_splitter: 텍스트 스플리터
+        page_offset: 수동 페이지 오프셋 (pdf_page - offset = print_page)
+        double_page: 스프레드(양면) 모드
+        auto_detect_pages: [v2.1] 페이지 번호 자동 감지 (OCR 기반)
     """
     path = Path(file_path)
-    if path.suffix.lower() == '.pdf':
-        return _process_pdf_content(file_path, text_splitter, page_offset, double_page)
-    elif path.suffix.lower() == '.txt':
+    suffix = path.suffix.lower()
+    
+    if suffix == '.pdf':
+        return _process_pdf_content(file_path, text_splitter, page_offset, double_page, auto_detect_pages)
+    elif suffix == '.txt':
         return _process_text_content(file_path, text_splitter, page_offset)
+    elif suffix == '.epub':
+        return _process_epub_content(file_path, text_splitter)
     else:
-        print(f"      ⚠️ 지원하지 않는 파일 형식: {path.suffix}")
+        print(f"      ⚠️ 지원하지 않는 파일 형식: {suffix}")
         return []
+
+
+def _process_epub_content(epub_path: str, text_splitter) -> List[Dict[str, Any]]:
+    """
+    EPUB 파일 처리 - 챕터별 텍스트 추출 및 청킹
+    
+    Args:
+        epub_path: EPUB 파일 경로
+        text_splitter: 텍스트 스플리터
+    
+    Returns:
+        청크 리스트 (메타데이터 포함)
+    """
+    if not EPUB_AVAILABLE:
+        print("      ❌ EPUB 처리를 위해 'ebooklib'과 'beautifulsoup4'를 설치하세요:")
+        print("         pip install ebooklib beautifulsoup4")
+        return []
+    
+    filename = Path(epub_path).name
+    dict_abbrev, volume = extract_dictionary_info(filename)
+    
+    print(f"   📖 {filename}")
+    print(f"      형식: EPUB, 소스: {dict_abbrev}")
+    
+    try:
+        book = epub.read_epub(epub_path)
+    except Exception as e:
+        print(f"      ❌ EPUB 읽기 오류: {e}")
+        return []
+    
+    # 챕터별 텍스트 추출
+    chapters_data = []
+    chapter_num = 0
+    
+    for item in book.get_items():
+        if item.get_type() == epub.ITEM_DOCUMENT:
+            chapter_num += 1
+            content = item.get_content().decode('utf-8', errors='ignore')
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            # HTML 태그 제거, 텍스트만 추출
+            text = soup.get_text(separator='\n', strip=True)
+            
+            if text.strip():
+                chapters_data.append({
+                    'chapter_num': chapter_num,
+                    'chapter_id': item.get_id(),
+                    'text': text,
+                    'char_start': sum(len(c['text']) for c in chapters_data)
+                })
+    
+    if not chapters_data:
+        print(f"      ⚠️ EPUB에서 텍스트를 추출할 수 없습니다.")
+        return []
+    
+    print(f"      📚 {len(chapters_data)}개 챕터 발견")
+    
+    # 전체 텍스트 통합 및 청킹
+    full_text = "\n\n".join(c['text'] for c in chapters_data)
+    chunks = text_splitter.split_text(full_text)
+    
+    # 표제어 감지
+    chunk_lemmas = []
+    current_lemma = None
+    for chunk in chunks:
+        detected = extract_lemma(chunk)
+        if detected:
+            current_lemma = detected
+        chunk_lemmas.append(current_lemma)
+    
+    # 표제어별 청크 수 계산
+    lemma_chunk_counts = defaultdict(int)
+    for lemma in chunk_lemmas:
+        if lemma:
+            lemma_chunk_counts[lemma] += 1
+    
+    # 청크 메타데이터 생성
+    result = []
+    char_position = 0
+    lemma_current_index = defaultdict(int)
+    
+    for i, chunk in enumerate(chunks):
+        chunk_mid = char_position + len(chunk) // 2
+        
+        # 해당 챕터 찾기
+        chapter_num = 1
+        for ch in chapters_data:
+            if chunk_mid >= ch['char_start']:
+                chapter_num = ch['chapter_num']
+            else:
+                break
+        
+        # 표제어 정보
+        lemma = chunk_lemmas[i]
+        if lemma:
+            lemma_current_index[lemma] += 1
+            lemma_idx = lemma_current_index[lemma]
+            lemma_total = lemma_chunk_counts[lemma]
+        else:
+            lemma_idx = None
+            lemma_total = None
+        
+        # 확장 메타데이터
+        language = detect_language(chunk)
+        categories = extract_category(lemma, chunk)
+        related = extract_related_lemmas(chunk)
+        
+        metadata = {
+            "source": dict_abbrev,
+            "filename": filename,
+            "chunk_id": f"chunk_{i}",
+            "chapter": chapter_num,
+            "total_chapters": len(chapters_data),
+            "chunk_tokens": tiktoken_len(chunk),
+            "volume": volume,
+            "lemma": lemma,
+            "lemma_chunk_index": lemma_idx,
+            "lemma_total_chunks": lemma_total,
+            "file_type": "epub",
+            "language": language,
+            "category": categories,
+            "related_lemmas": related,
+        }
+        
+        # ID 생성
+        chunk_id = f"{dict_abbrev}"
+        if volume:
+            chunk_id += f"_{volume}"
+        if lemma:
+            chunk_id += f"_{lemma[:20]}"
+        chunk_id += f"_{i:04d}"
+        
+        result.append({
+            "id": chunk_id,
+            "text": chunk,
+            "metadata": metadata
+        })
+        
+        char_position += len(chunk)
+    
+    unique_lemmas = len([l for l in set(chunk_lemmas) if l])
+    print(f"      ✅ {len(result):,}개 청크 생성 ({unique_lemmas}개 표제어 감지)")
+    
+    return result
 
 def _process_text_content(txt_path: str, text_splitter, page_offset: int) -> List[Dict[str, Any]]:
     """TXT 파일 처리 (페이지 구분 없음 또는 간단한 구분)"""
@@ -188,11 +463,16 @@ def _process_text_content(txt_path: str, text_splitter, page_offset: int) -> Lis
             lemma_idx = None
             lemma_total = None
             
+        # [v2.0] 확장 메타데이터
+        language = detect_language(chunk)
+        categories = extract_category(lemma, chunk)
+        related = extract_related_lemmas(chunk)
+
         metadata = {
             "source": dict_abbrev,
             "filename": filename,
             "chunk_id": f"chunk_{i}",
-            "page_number": 1, # TXT는 기본 1
+            "page_number": 1,  # TXT는 기본 1
             "pdf_page": 1,
             "total_pages": 1,
             "chunk_tokens": tiktoken_len(chunk),
@@ -200,7 +480,11 @@ def _process_text_content(txt_path: str, text_splitter, page_offset: int) -> Lis
             "lemma": lemma,
             "lemma_chunk_index": lemma_idx,
             "lemma_total_chunks": lemma_total,
-            "is_spread": False
+            "is_spread": False,
+            # [v2.0] 확장 필드
+            "language": language,
+            "category": categories,
+            "related_lemmas": related,
         }
         
         chunk_id = f"{dict_abbrev}"
@@ -217,10 +501,51 @@ def _process_text_content(txt_path: str, text_splitter, page_offset: int) -> Lis
     print(f"      ✅ {len(result):,}개 텍스트 청크 생성")
     return result
 
-def _process_pdf_content(pdf_path: str, text_splitter, page_offset: int = 0, double_page: bool = False) -> List[Dict[str, Any]]:
+def _process_pdf_content(
+    pdf_path: str,
+    text_splitter,
+    page_offset: int = 0,
+    double_page: bool = False,
+    auto_detect_pages: bool = False,
+) -> List[Dict[str, Any]]:
     """
-    PDF 내용을 처리하는 내부 함수 (기존 process_pdf 로직)
+    PDF 내용을 처리하는 내부 함수
+
+    [v2.1] 페이지 매핑 우선순위:
+      1. .mapping.json 파일 (사용자 수동 매핑)
+      2. auto_detect_pages=True (OCR 자동 감지)
+      3. page_offset (단순 오프셋)
     """
+    # [v2.1] 페이지 매핑 로드
+    page_mapping = {}  # pdf_page → print_page
+    mapping_source = None
+
+    # 1순위: .mapping.json 파일 확인
+    try:
+        from page_mapping_loader import load_mapping_file
+        mapping_result = load_mapping_file(pdf_path)
+        if mapping_result:
+            page_mapping = mapping_result.page_map
+            mapping_source = f"매핑 파일 ({mapping_result.info})"
+            print(f"      ✅ {mapping_source}")
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"      ⚠️ 매핑 파일 로드 실패: {e}")
+
+    # 2순위: 자동 감지 (매핑 파일 없을 시)
+    if not page_mapping and auto_detect_pages:
+        try:
+            from page_number_detector import PageNumberDetector
+            detector = PageNumberDetector()
+            results = detector.detect_page_numbers(pdf_path, sample_pages=30, use_ocr=True)
+            page_mapping = detector.create_offset_map(results)
+            mapping_source = "자동 감지"
+            print(f"      ✨ 페이지 자동 감지 완료: {len(page_mapping)}페이지 매핑됨")
+        except ImportError:
+            print(f"      ⚠️ page_number_detector 모듈 없음")
+        except Exception as e:
+            print(f"      ⚠️ 페이지 감지 실패: {e}, 수동 오프셋 사용")
     # ═══════════════════════════════════════════════════════════════════
     # 📖 Double Page / Layout 처리 (TRE Bd.4 전용 매핑 포함)
     # ═══════════════════════════════════════════════════════════════════
@@ -329,8 +654,12 @@ def _process_pdf_content(pdf_path: str, text_splitter, page_offset: int = 0, dou
     
     # 페이지 텍스트 수집
     pages_data = []
+    total_pages = len(reader.pages)
     
     for page_num, page in enumerate(reader.pages, 1):
+        # 10페이지마다 또는 마지막 페이지에 진행률 출력
+        if page_num % 10 == 0 or page_num == total_pages:
+            print(f"[PROGRESS] {int(page_num / total_pages * 50)}% (텍스트 추출 중...)")
         if double_page:
             left_txt, right_txt = split_double_page(page)
             
@@ -383,6 +712,7 @@ def _process_pdf_content(pdf_path: str, text_splitter, page_offset: int = 0, dou
     
     # 텍스트 통합 및 청킹
     full_text = "\n\n".join(p['text'] for p in pages_data)
+    print(f"[PROGRESS] 60% (청킹 시작...)")
     chunks = text_splitter.split_text(full_text)
     
     # 표제어 감지 (1차 패스)
@@ -428,20 +758,39 @@ def _process_pdf_content(pdf_path: str, text_splitter, page_offset: int = 0, dou
             lemma_idx = None
             lemma_total = None
         
-        # 메타데이터 (이미 보정된 paper_page 사용)
+        # [v2.0] 확장 메타데이터
+        language = detect_language(chunk)
+        categories = extract_category(lemma, chunk)
+        related = extract_related_lemmas(chunk)
+
+        # [v2.1] 실제 인쇄본 페이지 번호 결정
+        # 우선순위: 자동 감지 > 수동 오프셋 > 기존 page_num
+        if page_mapping and pdf_page in page_mapping:
+            print_page = page_mapping[pdf_page]
+        elif page_offset:
+            print_page = max(1, pdf_page - page_offset)
+        else:
+            print_page = page_num  # 기존 로직 유지
+
+        # 메타데이터
         metadata = {
             "source": dict_abbrev,
             "filename": filename,
             "chunk_id": f"chunk_{i}",
-            "page_number": page_num,
-            "pdf_page": pdf_page,
+            "page_number": page_num,       # 기존 호환용 (deprecated)
+            "pdf_page": pdf_page,          # PDF 물리적 페이지
+            "print_page": print_page,      # [v2.1] 실제 인쇄본 페이지
             "total_pages": len(reader.pages),
             "chunk_tokens": tiktoken_len(chunk),
             "volume": volume,
             "lemma": lemma,
             "lemma_chunk_index": lemma_idx,
             "lemma_total_chunks": lemma_total,
-            "is_spread": double_page
+            "is_spread": double_page,
+            # [v2.0] 확장 필드
+            "language": language,
+            "category": categories,
+            "related_lemmas": related,
         }
         
         # ID 생성
@@ -459,6 +808,11 @@ def _process_pdf_content(pdf_path: str, text_splitter, page_offset: int = 0, dou
         })
         
         char_position += len(chunk)
+        
+        # 청킹 진행률 (60% ~ 100%)
+        if i % 50 == 0 or i == len(chunks) - 1:
+            prog = 60 + int((i + 1) / len(chunks) * 40)
+            print(f"[PROGRESS] {prog}% (청크 메타데이터 생성 중...)")
     
     # 통계
     unique_lemmas = len([l for l in set(chunk_lemmas) if l])
@@ -488,13 +842,19 @@ def main():
                         help='PDF페이지 - 오프셋 = 종이책 페이지 (예: TRE는 2)')
     parser.add_argument('--double-page', action='store_true',
                         help='PDF 1페이지에 종이책 2페이지가 포함된 경우(스프레드)')
-    
+    parser.add_argument('--auto-detect', action='store_true',
+                        help='[v2.1] 페이지 번호 자동 감지 (OCR 기반)')
+
     args = parser.parse_args()
     
     # 출력 폴더 생성
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    if RecursiveCharacterTextSplitter is None:
+        print("❌ 'langchain-text-splitters' 패키지가 설치되지 않았습니다.")
+        sys.exit(1)
+
     # 텍스트 스플리터 설정
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=args.chunk_size,
@@ -538,7 +898,13 @@ def main():
         print(f"\n[{i}/{len(input_files)}] 📄 {filename}")
         
         try:
-            chunks = process_file(str(input_file), text_splitter, args.page_offset, args.double_page)
+            chunks = process_file(
+                str(input_file),
+                text_splitter,
+                args.page_offset,
+                args.double_page,
+                args.auto_detect,
+            )
             
             if chunks:
                 # 출력 파일명 결정 (입력 파일명 유지)
@@ -559,13 +925,17 @@ def main():
                     # 여기서는 list of dicts로 저장
                     f.write(json.dumps(chunks, ensure_ascii=False, indent=2))
                 
+            if chunks:
+                # ...
                 print(f"   💾 저장 완료: {output_filename}")
                 print(f"   📊 청크 수: {len(chunks):,}개")
+            else:
+                print(f"   ⚠️  생성된 청크가 없습니다. (빈 파일 또는 OCR 필요)")
+                sys.exit(1) # 파이프라인에 실패 알림
 
         except Exception as e:
             print(f"      ❌ 오류: {e}")
-            import traceback
-            traceback.print_exc()
+            sys.exit(1)
 
     print("\n" + "=" * 60)
     print("🎉 변환 완료!")

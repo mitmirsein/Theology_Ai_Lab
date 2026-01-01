@@ -37,16 +37,15 @@ echo ARCHIVE_DIR=./01_Library/archive
 echo INBOX_DIR=./01_Library/inbox
 ) > .env
 
-:: 5. Launch
-echo ✅ 설치 완료!
-echo 🚀 연구소를 실행합니다...
+:: 5. Complete & Launch App
+echo.
+echo ✅ ==========================================
+echo    설치가 완료되었습니다!
+echo ============================================
+echo.
+echo 🚀 연구소를 바로 실행합니다...
+echo    (브라우저가 자동으로 열립니다)
+echo.
 
-where code >nul 2>nul
-if %errorlevel% neq 0 (
-    echo ⚠️ Antigravity/VSCode가 없습니다.
-    start https://antigravity.google
-    pause
-)
-
-start .
-pause
+:: Launch the app directly
+call 3_START_WIN.bat

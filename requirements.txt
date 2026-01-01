@@ -11,14 +11,16 @@ transformers==4.57.3
 # Core - Deep Learning
 torch==2.2.2
 
-# Core - Essential (Numpy < 2.0 for compat)
-numpy>=1.26.0,<2.0
+# Core - Essential (Numpy < 2.0 for torch 2.2 compat)
+numpy>=1.26.0,<2.0  # 필수: torch 2.2와 호환성
 
 # MCP (Antigravity Integration)
 mcp==1.24.0
 
-# Secretariat Agents
-google-genai==0.3.0
+# Secretariat Agents & AI API Clients
+anthropic>=0.40.0
+openai>=1.50.0
+google-genai>=1.0.0
 playwright==1.49.1
 pydantic>=2.11.0
 python-dotenv==1.0.1
@@ -27,3 +29,6 @@ python-dotenv==1.0.1
 pypdf==5.1.0
 langchain-text-splitters==0.3.4
 tiktoken==0.8.0
+
+# GUI
+streamlit>=1.28.0
