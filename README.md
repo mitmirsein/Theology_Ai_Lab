@@ -18,6 +18,15 @@
 
 ### 2. 설치
 
+#### ⚡ AI 에이전트로 설치 (Antigravity, Gemini CLI 등)
+
+zip 압축 해제 후 AI에게 요청:
+```
+이 폴더에서 1_INSTALL_MAC.command를 실행해서 설치해줘.
+```
+
+#### 🖱️ 수동 설치
+
 1. **압축 해제** - 원하는 위치에 폴더 생성
 2. **설치 스크립트 실행**
    - 🍎 **Mac:** `1_INSTALL_MAC.command` 더블클릭
