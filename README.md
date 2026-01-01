@@ -38,12 +38,26 @@
 
 ---
 
-## 📚 상세 문서
+## � Obsidian 연동
 
-설치 후 폴더 내 문서 참조:
-- `QUICKSTART.md` - 빠른 시작
-- `USAGE.md` - 상세 사용법
-- `docs/` - 추가 가이드
+검색 결과를 Obsidian 노트로 바로 저장할 수 있습니다.
+
+### 설정 방법
+1. **Obsidian Vault 경로 설정** - GUI 설정 페이지에서 경로 입력
+2. **검색 후 저장** - 🔍 검색 → 📝 Obsidian 저장 버튼
+
+### 저장 형식
+```markdown
+---
+source: TDNT
+query: χάρις
+date: 2026-01-01
+---
+# 검색 결과: χάρις
+[AI 분석 내용 + 원문 청크]
+```
+
+*상세 가이드: 설치 후 `docs/OBSIDIAN_INTEGRATION.md` 참조*
 
 ---
 
