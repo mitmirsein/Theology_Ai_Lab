@@ -17,3 +17,4 @@ __pycache__/
 # Workspace
 *.code-workspace
 .env.bak
+.env.bak
