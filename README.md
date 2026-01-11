@@ -54,9 +54,9 @@
    # 구글 드라이브 경로 (자신의 환경에 맞게 수정)
    # Mac 예시: /Users/사용자명/Library/CloudStorage/GoogleDrive-이메일/내 드라이브/Theology_AI_LAB
    
-   INBOX_DIR=/Users/msn/Library/CloudStorage/GoogleDrive-.../01_Library/inbox
-   ARCHIVE_DIR=/Users/msn/Library/CloudStorage/GoogleDrive-.../01_Library/archive
-   DB_PATH=/Users/msn/Library/CloudStorage/GoogleDrive-.../02_Brain/vector_db
+   INBOX_DIR=/Users/username/Library/CloudStorage/GoogleDrive-email/내 드라이브/Theology_AI_LAB/01_Library/inbox
+   ARCHIVE_DIR=/Users/username/Library/CloudStorage/GoogleDrive-email/내 드라이브/Theology_AI_LAB/01_Library/archive
+   DB_PATH=/Users/username/Library/CloudStorage/GoogleDrive-email/내 드라이브/Theology_AI_LAB/02_Brain/vector_db
    
    # AI API 키 (선택 사항)
    ANTHROPIC_API_KEY=sk-...
