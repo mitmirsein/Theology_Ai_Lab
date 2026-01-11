@@ -14,10 +14,16 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import sys
 import json
 import shutil
+import re
 from pathlib import Path
 from datetime import datetime
 
 import streamlit as st
+import logging
+
+# Logger setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("App")
 
 # 경로 설정
 SCRIPT_DIR = Path(__file__).parent.absolute()
@@ -87,10 +93,52 @@ st.set_page_config(
 # 캐시된 리소스 로드
 # ============================================================
 @st.cache_resource
-def load_model():
-    """임베딩 모델 로드"""
-    from sentence_transformers import SentenceTransformer
-    return SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+def load_embedder():
+    """BGE-M3 임베딩 모델 로드 (M1 가속 지원)"""
+    from pipeline.embedder import TheologyEmbedder
+    return TheologyEmbedder()
+
+@st.cache_resource
+def load_searcher(_db_path: str):
+    """Hybrid 검색 엔진 로드"""
+    from pipeline.searcher import TheologySearcher
+    from langchain_chroma import Chroma
+    from langchain_core.documents import Document
+    
+    # 임베딩 모델 로드
+    embedder = load_embedder()
+    
+    # Chroma DB 연결 (embedder 객체 직접 전달)
+    vector_db = Chroma(
+        persist_directory=_db_path,
+        embedding_function=embedder,
+        collection_name="theology_library"
+    )
+    
+    searcher = TheologySearcher(vector_db)
+    
+    # BM25 구성을 위해 전체 문서 로드 (하이브리드 검색용)
+    try:
+        results = vector_db.get(include=["documents", "metadatas"])
+        if results and results["documents"]:
+            all_docs = [
+                Document(page_content=d, metadata=m) 
+                for d, m in zip(results["documents"], results["metadatas"])
+            ]
+            searcher.build_ensemble(all_docs)
+    except Exception as e:
+        logger.error(f"Failed to build ensemble: {e}")
+        
+    return searcher
+
+@st.cache_resource
+def load_query_expander():
+    """3중 언어 쿼리 확장기 로드"""
+    try:
+        from utils.query_expander import QueryExpander
+        return QueryExpander()
+    except ImportError:
+        return None
 
 @st.cache_resource
 def load_db(_db_path: str):
@@ -99,12 +147,15 @@ def load_db(_db_path: str):
     db_path = Path(_db_path)
     if not db_path.exists():
         return None, None
-    client = chromadb.PersistentClient(path=_db_path)
+    
     try:
+        client = chromadb.PersistentClient(path=_db_path)
         collection = client.get_collection(name="theology_library")
+        # [v4.0.1] DB 무결성 확인 (Reset 직후 테이블 없음 에러 방지)
+        _ = collection.count() 
         return client, collection
-    except:
-        return client, None
+    except Exception:
+        return None, None
 
 @st.cache_data(ttl=60)
 def load_lemma_index(_index_path: str):
@@ -165,6 +216,7 @@ def get_sources_from_db() -> dict:
     try:
         client = chromadb.PersistentClient(path=str(DB_PATH))
         collection = client.get_collection(name="theology_library")
+        _ = collection.count() # Health check
     except Exception:
         return {}
 
@@ -195,9 +247,10 @@ def delete_source_from_db(source_name: str) -> int:
     """
     import chromadb
 
-    client = chromadb.PersistentClient(path=str(DB_PATH))
     try:
+        client = chromadb.PersistentClient(path=str(DB_PATH))
         collection = client.get_collection(name="theology_library")
+        _ = collection.count() # Health check
     except Exception:
         return 0
 
@@ -263,8 +316,11 @@ def reindex_source(source_name: str) -> str:
 
     # 4. 모델 및 DB 연결
     model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-    client = chromadb.PersistentClient(path=str(DB_PATH))
-    collection = client.get_or_create_collection(name="theology_library")
+    try:
+        client = chromadb.PersistentClient(path=str(DB_PATH))
+        collection = client.get_or_create_collection(name="theology_library")
+    except Exception as e:
+        return f"DB 연결 실패: {e}"
 
     # 5. 재인덱싱
     documents = []
@@ -320,9 +376,10 @@ def check_duplicate_source(source_name: str) -> dict:
     """
     import chromadb
 
-    client = chromadb.PersistentClient(path=str(DB_PATH))
     try:
+        client = chromadb.PersistentClient(path=str(DB_PATH))
         collection = client.get_collection(name="theology_library")
+        _ = collection.count() # Health check
     except Exception:
         return {"exists": False, "count": 0, "indexed_at": None}
 
@@ -376,17 +433,24 @@ sidebar_html = (
     f'<div style="font-size: 1.5em; font-weight: 900; color: #FFFFFF; letter-spacing: 0.5px; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">{title_main}</div>'
     '</div>'
     '<div style="display: inline-block; background: linear-gradient(135deg, #7C3AED 0%, #6B21A8 100%); color: white; padding: 4px 16px; border-radius: 20px; font-size: 0.7em; font-weight: 700; letter-spacing: 0.5px; box-shadow: 0 2px 8px rgba(124, 58, 237, 0.4);">'
-    'v2.7 Premium'
+    'v4.0.0'
     '</div>'
     '</div>'
 )
 
 st.sidebar.markdown(sidebar_html, unsafe_allow_html=True)
+
+# 하드웨어 정보 표시
+embedder = load_embedder()
+st.sidebar.info(f" 엔진: BGE-M3 | 가속: {embedder.device.upper()}")
+
 st.sidebar.markdown("---")
+
+
 
 page = st.sidebar.radio(
     "메뉴",
-    ["🔍 검색", "📤 파일 업로드", "📊 통계", "⚙️ 설정"],
+    ["🔍 검색", "📊 통계", "⚙️ 설정"],
     label_visibility="collapsed"
 )
 
@@ -446,8 +510,7 @@ st.sidebar.markdown(
         </a>
         <br><br>
         <div style="color: #A0AEC0; font-size: 0.8em; line-height: 1.4;">
-            © 2025 Kerygma Press<br>
-            <span style="letter-spacing: 1px; font-weight: 500;">INTELLIGENT SCRIBE</span>
+            © 2025 Kerygma Press
         </div>
     </div>
     """,
@@ -572,14 +635,11 @@ def run_pipeline(chunk_size: int, overlap: int, target_file: str = None):
         
         cmd = [
             sys.executable, 
-            str(SCRIPT_DIR / "utils" / "pipeline.py"),
-            "--chunk-size", str(chunk_size),
-            "--overlap", str(overlap)
+            str(SCRIPT_DIR / "processor_v4.py"),
+            "--inbox", str(INBOX_DIR),
+            "--archive", str(ARCHIVE_DIR),
+            "--db", str(DB_PATH)
         ]
-        
-        # v2.6: 특정 파일이 지정된 경우 인자로 추가
-        if target_file:
-            cmd.append(target_file)
         
         with st.status(f"🏗️ 인덱싱 파이프라인 가동 중{' (개별 파일)' if target_file else ''}...", expanded=True) as log_status:
             log_output = st.empty()
@@ -647,13 +707,14 @@ if page == "🔍 검색":
         </div>
     """, unsafe_allow_html=True)
 
-    model = load_model()
+
     client, collection = load_db(str(DB_PATH))
 
     if collection is None:
         st.warning("⚠️ 데이터베이스가 비어있습니다. 먼저 파일을 업로드하세요.")
     else:
-        st.caption(f"📚 인덱싱된 청크: {collection.count()}개")
+        # [Cloud Edition] 청크 수는 통계 페이지에서 확인
+        pass
 
         # 검색 입력
         query = st.text_input(
@@ -661,18 +722,94 @@ if page == "🔍 검색":
             placeholder="예: 칭의, Gnade, Rechtfertigung..."
         )
 
-        col1, col2 = st.columns([3, 1])
-        with col2:
+        # 검색 옵션
+        col_opt1, col_opt2, col_opt3 = st.columns([2, 2, 1])
+        with col_opt1:
+            use_trilingual = st.checkbox("🌐 3중 언어 확장 (한/영/독)", value=True, help="신학 용어를 한국어, 영어, 독일어로 자동 확장합니다")
+        with col_opt2:
+            use_dual_search = st.checkbox("🔍 이중 검색 (Vector+JSON)", value=True, help="벡터 검색과 키워드 검색을 동시 수행합니다")
+        with col_opt3:
             n_results = st.selectbox("결과 수", [5, 10, 20], index=0)
+
+        # 3중 언어 확장 표시
+        if query and use_trilingual:
+            expander = load_query_expander()
+            if expander:
+                expanded = expander.expand(query)
+                if expanded.matched_concepts:
+                    with st.expander(f"🌐 쿼리 확장: {', '.join(expanded.matched_concepts)}", expanded=False):
+                        col_lang1, col_lang2, col_lang3 = st.columns(3)
+                        with col_lang1:
+                            st.caption("🇰🇷 한국어")
+                            st.write(", ".join(expanded.korean[:5]))
+                        with col_lang2:
+                            st.caption("🇺🇸 English")
+                            st.write(", ".join(expanded.english[:5]))
+                        with col_lang3:
+                            st.caption("🇩🇪 Deutsch")
+                            st.write(", ".join(expanded.german[:5]))
 
         if query:
             with st.spinner("검색 중..."):
-                # 벡터 검색
-                query_vec = model.encode([query]).tolist()
-                results = collection.query(
-                    query_embeddings=query_vec,
-                    n_results=n_results
-                )
+                # 3중 언어 확장 적용
+                search_queries = [query]
+                if use_trilingual:
+                    expander = load_query_expander()
+                    if expander:
+                        search_queries = expander.get_embedding_queries(query, max_q=3)
+                
+                all_results = []
+                
+                # 이중 검색 모드
+                if use_dual_search:
+                    try:
+                        from utils.dual_search import DualSearchEngine
+                        dual_engine = DualSearchEngine(
+                            db_path=str(DB_PATH),
+                            archive_path=str(ARCHIVE_DIR),
+                            use_trilingual=use_trilingual
+                        )
+                        dual_results = dual_engine.search(query, n_results=n_results * 2)
+                        
+                        # DualSearchEngine 결과를 Document 형식으로 변환
+                        from langchain_core.documents import Document
+                        for r in dual_results:
+                            doc = Document(
+                                page_content=r.content,
+                                metadata={
+                                    "source": r.source,
+                                    "author": r.author,
+                                    "doc_type": r.doc_type,
+                                    "page": r.page,
+                                    "search_method": r.method,
+                                    **r.metadata
+                                }
+                            )
+                            all_results.append(doc)
+                    except Exception as e:
+                        logger.warning(f"Dual search failed, falling back: {e}")
+                        use_dual_search = False  # Fallback to normal search
+                
+                # 일반 벡터 검색 (fallback 또는 이중 검색 비활성화 시)
+                if not use_dual_search or not all_results:
+                    searcher = load_searcher(str(DB_PATH))
+                    for sq in search_queries:
+                        results_docs = searcher.search(sq)
+                        all_results.extend(results_docs)
+                
+                # 중복 제거 (content 기준)
+                seen_contents = set()
+                unique_results = []
+                for doc in all_results:
+                    content_key = doc.page_content[:100]
+                    if content_key not in seen_contents:
+                        seen_contents.add(content_key)
+                        unique_results.append(doc)
+                
+                # 기존 결과를 딕셔너리 형태로 변환 (기존 UI 호환성 유지)
+                documents = [d.page_content for d in unique_results[:n_results]]
+                metadatas = [d.metadata for d in unique_results[:n_results]]
+                results = {'documents': [documents], 'metadatas': [metadatas]}
 
             if results['documents'] and results['documents'][0]:
                 st.markdown(f"### 검색 결과 ({len(results['documents'][0])}건)")
@@ -695,7 +832,13 @@ if page == "🔍 검색":
                     for i, doc in enumerate(results['documents'][0]):
                         meta = results['metadatas'][0][i]
                         source = meta.get('source', 'Unknown')
-                        page_num = meta.get('page_number', '?')
+                        # 메타데이터 키 호환성 처리 (page or page_number)
+                        raw_page = meta.get('page', meta.get('page_number', '?'))
+                        try:
+                            page_num = int(raw_page) + PAGE_OFFSET if str(raw_page).isdigit() else raw_page
+                        except:
+                            page_num = raw_page
+                        
                         lemma = meta.get('lemma', '')
                         category = meta.get('category', '')
 
@@ -756,8 +899,8 @@ if page == "🔍 검색":
                     except Exception as e:
                         return False, str(e)
 
-                # 복사/다운로드/옵시디언/AI 리포트 버튼
-                export_col1, export_col2, export_col3, export_col4 = st.columns([1, 1, 1, 1])
+                # 다운로드/옵시디언/AI 리포트 버튼
+                export_col1, export_col2, export_col3 = st.columns([1, 1, 1])
                 with export_col1:
                     st.download_button(
                         label="📥 다운로드",
@@ -767,10 +910,6 @@ if page == "🔍 검색":
                         key="download_report"
                     )
                 with export_col2:
-                    if st.button("📋 복사", key="copy_report"):
-                        st.session_state["report_to_copy"] = markdown_report
-                        st.success("✅ 아래에서 복사하세요")
-                with export_col3:
                     if st.button("🟣 옵시디언", key="obsidian_report"):
                         filename = f"검색_{query}_{datetime.now().strftime('%Y%m%d_%H%M')}"
                         success, result = save_to_obsidian(markdown_report, filename)
@@ -778,7 +917,7 @@ if page == "🔍 검색":
                             st.success(f"✅ 저장됨: {Path(result).name}")
                         else:
                             st.error(f"❌ {result}")
-                with export_col4:
+                with export_col3:
                     # API 설정 확인
                     provider, model_name, api_key = get_active_api_config()
                     if provider and api_key:
@@ -799,7 +938,11 @@ if page == "🔍 검색":
                             for i, doc in enumerate(results['documents'][0]):
                                 meta = results['metadatas'][0][i]
                                 source = meta.get('source', 'Unknown')
-                                page_num = meta.get('page_number', '?')
+                                raw_page = meta.get('page', meta.get('page_number', '?'))
+                                try:
+                                    page_num = int(raw_page) + PAGE_OFFSET if str(raw_page).isdigit() else raw_page
+                                except:
+                                    page_num = raw_page
                                 context_parts.append(f"[출처: {source}, p.{page_num}]\n{doc}")
 
                             context = "\n\n---\n\n".join(context_parts)
@@ -843,14 +986,6 @@ if page == "🔍 검색":
 
                     st.markdown("---")
 
-                # 복사용 텍스트 영역 (버튼 클릭 시 표시)
-                if st.session_state.get("report_to_copy"):
-                    with st.expander("📋 복사할 내용 (Ctrl+A, Ctrl+C)", expanded=True):
-                        st.code(st.session_state["report_to_copy"], language="markdown")
-                        if st.button("닫기", key="close_copy"):
-                            st.session_state["report_to_copy"] = None
-                            st.rerun()
-
                 st.markdown("---")
 
                 # 개별 결과 표시
@@ -859,342 +994,44 @@ if page == "🔍 검색":
 
                     # 출처 정보
                     source = meta.get('source', 'Unknown')
-                    page_num = meta.get('page_number', '?')
+                    raw_page = meta.get('page', meta.get('page_number', '?'))
+                    page_num = raw_page
+                    
                     lemma = meta.get('lemma', '')
                     category = meta.get('category', '')
+                    author = meta.get('author', '')
+
+                    # 하이라이팅 처리 (단순 텍스트 교체)
+                    highlighted_doc = doc
+                    if query:
+                        # 한국어/영어/독일어 키워드 강조
+                        keywords = query.split()
+                        for kw in keywords:
+                            if len(kw) > 1:
+                                pattern = re.compile(re.escape(kw), re.IGNORECASE)
+                                highlighted_doc = pattern.sub(f"<mark style='background-color: #FEF08A; border-radius: 2px; padding: 0 2px;'>{kw}</mark>", highlighted_doc)
 
                     # 카드 형식으로 표시
                     with st.expander(f"**[{i+1}] {source}** - p.{page_num} {f'| {lemma}' if lemma else ''}", expanded=(i==0)):
-                        if category:
-                            st.caption(f"📂 {category}")
-                        st.markdown(doc)
+                        if category or author:
+                            st.caption(f"📂 {category} {'| ✍️ ' + author if author else ''}")
+                        st.markdown(highlighted_doc, unsafe_allow_html=True)
+                        
+                        # 추가 메타데이터 정보 (고급 사용자용)
+                        if st.checkbox(f"메타데이터 보기 ##{i}", key=f"meta_{i}"):
+                            st.json(meta)
             else:
                 st.info("검색 결과가 없습니다.")
 
 # ============================================================
 # 파일 업로드 페이지
 # ============================================================
-elif page == "📤 파일 업로드":
-    st.markdown("""
-        <div style="padding-bottom: 25px;">
-            <h1 style="color: #2D3748; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 0;">📤 신규 자료 등록</h1>
-            <p style="color: #718096; font-size: 1.1em; font-weight: 400;">새로운 연구 자료를 서재에 등록하고 AI의 지성을 더하세요.</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    # [v2.7.23] 파이프라인 완료 후 안내 (세션 상태 지속)
-    if st.session_state.get("pipeline_completed", False):
-        st.markdown("---")
-        st.markdown("### 🎉 인덱싱 완료!")
-        col_result1, col_result2 = st.columns(2)
-        with col_result1:
-            st.info("""
-            **✅ 완료된 작업:**
-            - 📄 PDF → 텍스트 추출
-            - ✂️ 청킹 (의미 단위 분할)
-            - 🧠 벡터 임베딩 생성
-            - 🗄️ ChromaDB 인덱싱
-            - 📦 원본 파일 아카이브 이동
-            """)
-        with col_result2:
-            st.success("""
-            **🚀 다음 단계:**
-            
-            **🔍 검색** 메뉴로 이동하여:
-            - 키워드 검색 (예: 칭의, Gnade)
-            - AI 분석 리포트 생성
-            - 옵시디언 연동 저장
-            """)
-        
-        # 검색 페이지로 이동 버튼
-        col_btn1, col_btn2 = st.columns([1, 1])
-        with col_btn1:
-            if st.button("🔍 검색 시작하기", type="primary", key="go_to_search", use_container_width=True):
-                st.session_state["pipeline_completed"] = False
-                st.session_state["page"] = "🔍 검색"
-                st.rerun()
-        with col_btn2:
-            if st.button("📄 추가 파일 등록", key="continue_upload", use_container_width=True):
-                st.session_state["pipeline_completed"] = False
-                st.rerun()
-        st.markdown("---")
-
-    st.markdown("""
-    PDF 파일을 업로드하면 자동으로 처리됩니다:
-    1. 텍스트 추출 (이미지 PDF는 OCR)
-    2. 청킹 및 메타데이터 추출
-    3. 벡터 데이터베이스 인덱싱
-    """)
-
-    # ─────────────────────────────────────────────────────────
-    # [v2.8] 청킹 설정 고정 (E5-base 최적화)
-    chunk_size = 800
-    overlap = 200
-
-    st.markdown("---")
-
-    st.caption("📦 **지원 형식:** PDF, TXT, EPUB | **최대 1GB** 업로드 가능")
-    uploaded_files = st.file_uploader(
-        "파일 선택",
-        type=["pdf", "txt", "epub"],
-        accept_multiple_files=True,
-        label_visibility="collapsed"
-    )
-
-    if uploaded_files:
-        st.markdown(f"### 업로드된 파일 ({len(uploaded_files)}개)")
-        
-        # [v2.7.23] 파일 업로드 시 다음 단계 안내
-        st.info("""
-        📋 **다음 단계 안내:**
-        1. 아래에서 파일 목록을 확인하세요
-        2. (선택) 페이지 매핑 설정 (PDF 페이지 번호 ≠ 인쇄본 페이지)
-        3. **🚀 처리 시작** 버튼을 클릭하면 자동으로:
-           - 텍스트 추출 → 청킹 → 벡터화 → 인덱싱이 진행됩니다
-        """)
-
-        # ─────────────────────────────────────────────────────────
-        # 중복 인덱싱 체크
-        # ─────────────────────────────────────────────────────────
-        duplicates = []
-        for f in uploaded_files:
-            source_name = Path(f.name).stem
-            dup_info = check_duplicate_source(source_name)
-            if dup_info["exists"]:
-                duplicates.append((f.name, source_name, dup_info))
-                st.warning(f"⚠️ **{f.name}**: 이미 인덱싱됨 ({dup_info['count']:,}개 청크, {dup_info['indexed_at'][:10] if dup_info['indexed_at'] else '날짜 불명'})")
-            else:
-                st.write(f"✅ {f.name} ({f.size / 1024:.1f} KB)")
-
-        # 중복 파일이 있을 경우 처리 옵션
-        if duplicates:
-            st.markdown("---")
-            dup_action = st.radio(
-                "중복 파일 처리 방법",
-                ["스킵 (기존 유지)", "덮어쓰기 (재인덱싱)"],
-                key="duplicate_action",
-                horizontal=True
-            )
-            if "duplicate_action_selected" not in st.session_state:
-                st.session_state.duplicate_action_selected = dup_action
-            else:
-                st.session_state.duplicate_action_selected = dup_action
-
-        # ─────────────────────────────────────────────────────────
-        # 페이지 매핑 설정 (확장 패널)
-        # ─────────────────────────────────────────────────────────
-        with st.expander("📖 페이지 매핑 설정 (선택)", expanded=False):
-            st.caption("PDF 페이지 번호와 실제 인쇄본 페이지 번호가 다른 경우 설정하세요.")
-
-            # 세션 상태로 매핑 데이터 관리
-            if 'page_mappings' not in st.session_state:
-                st.session_state.page_mappings = {}
-            if 'sample_counts' not in st.session_state:
-                st.session_state.sample_counts = {}
-
-            for uploaded_file in uploaded_files:
-                filename = uploaded_file.name
-                st.markdown(f"**{filename}**")
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    use_mapping = st.checkbox(
-                        "페이지 매핑 사용",
-                        key=f"use_mapping_{filename}",
-                        value=filename in st.session_state.page_mappings
-                    )
-
-                if use_mapping:
-                    # 샘플 개수 관리
-                    if filename not in st.session_state.sample_counts:
-                        st.session_state.sample_counts[filename] = 5  # 기본 5개
-
-                    sample_count = st.session_state.sample_counts[filename]
-
-                    st.caption(f"PDF를 열고 {sample_count}개 지점의 페이지 번호를 확인하세요:")
-
-                    # 샘플 추가/제거 버튼
-                    btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 3])
-                    with btn_col1:
-                        if st.button("➕ 추가", key=f"add_sample_{filename}"):
-                            if st.session_state.sample_counts[filename] < 10:
-                                st.session_state.sample_counts[filename] += 1
-                                st.rerun()
-                    with btn_col2:
-                        if st.button("➖ 제거", key=f"remove_sample_{filename}"):
-                            if st.session_state.sample_counts[filename] > 2:
-                                st.session_state.sample_counts[filename] -= 1
-                                st.rerun()
-                    with btn_col3:
-                        st.caption(f"(최소 2개, 최대 10개)")
-
-                    # 기본 샘플 값 정의
-                    default_samples_all = [
-                        (15, 1, "본문시작"),
-                        (50, 36, "중간1"),
-                        (100, 86, "중간2"),
-                        (150, 136, "중간3"),
-                        (200, 186, "후반1"),
-                        (250, 236, "후반2"),
-                        (300, 286, "끝1"),
-                        (350, 336, "끝2"),
-                        (400, 386, "끝3"),
-                        (450, 436, "끝4"),
-                    ]
-
-                    # 동적 샘플 입력
-                    samples = []
-                    sample_count = st.session_state.sample_counts[filename]
-
-                    # 한 행에 최대 5개씩 표시
-                    for row_start in range(0, sample_count, 5):
-                        row_end = min(row_start + 5, sample_count)
-                        cols = st.columns(row_end - row_start)
-
-                        for col_idx, idx in enumerate(range(row_start, row_end)):
-                            default_pdf, default_print, label = default_samples_all[idx] if idx < len(default_samples_all) else (100 + idx * 50, 100 + idx * 50 - 14, f"샘플{idx+1}")
-
-                            with cols[col_idx]:
-                                st.caption(label)
-                                pdf_p = st.number_input(
-                                    "PDF",
-                                    min_value=1,
-                                    value=default_pdf,
-                                    key=f"pdf_{filename}_{idx}"
-                                )
-                                print_p = st.number_input(
-                                    "종이",
-                                    min_value=0,
-                                    value=default_print,
-                                    key=f"print_{filename}_{idx}",
-                                    help="0 = 페이지 번호 없음"
-                                )
-                                samples.append({
-                                    "pdf": pdf_p,
-                                    "print": print_p if print_p > 0 else None
-                                })
-
-                    # 세션에 저장
-                    st.session_state.page_mappings[filename] = samples
-                else:
-                    if filename in st.session_state.page_mappings:
-                        del st.session_state.page_mappings[filename]
-                    if filename in st.session_state.sample_counts:
-                        del st.session_state.sample_counts[filename]
-
-                st.markdown("---")
-
-
-        # ─────────────────────────────────────────────────────────
-        # 처리 시작 버튼
-        # ─────────────────────────────────────────────────────────
-        if st.button("🚀 처리 시작", type="primary"):
-            try:
-                # inbox에 저장
-                INBOX_DIR.mkdir(parents=True, exist_ok=True)
-
-                progress = st.progress(0)
-                status = st.empty()
-
-                for i, uploaded_file in enumerate(uploaded_files):
-                    filename = uploaded_file.name
-                    status.text(f"저장 중: {filename}")
-
-                    # PDF 저장
-                    file_path = INBOX_DIR / filename
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-
-                    # 매핑 파일 저장 (설정된 경우)
-                    if filename in st.session_state.page_mappings:
-                        mapping_data = {
-                            "type": "samples",
-                            "samples": st.session_state.page_mappings[filename]
-                        }
-                        mapping_path = file_path.with_suffix('.mapping.json')
-                        with open(mapping_path, "w", encoding="utf-8") as f:
-                            json.dump(mapping_data, f, ensure_ascii=False, indent=2)
-                        status.text(f"매핑 저장: {mapping_path.name}")
-
-                    progress.progress((i + 1) / len(uploaded_files))
-
-                status.text("파일 저장 완료. 처리 시작...")
-                
-                # [v2.7.23] 세션 상태로 트리거하여 전체 너비 진행률 표시
-                st.session_state["run_upload_pipeline"] = True
-                st.session_state["upload_chunk_size"] = chunk_size
-                st.session_state["upload_overlap"] = overlap
-                st.rerun()
-            
-            except Exception as e:
-                st.error(f"❌ 시스템 오류: {e}")
-    
-    # [v2.7.23] 업로드 파이프라인 실행 (전체 너비)
-    if st.session_state.get("run_upload_pipeline"):
-        st.session_state["run_upload_pipeline"] = False
-        run_pipeline(
-            st.session_state.get("upload_chunk_size", 800),
-            st.session_state.get("upload_overlap", 200)
-        )
-
-    # 현재 inbox 상태
-    st.markdown("---")
-    st.markdown("### 📥 Inbox 현황")
-
-    if INBOX_DIR.exists():
-        inbox_files = list(INBOX_DIR.glob("*.pdf")) + list(INBOX_DIR.glob("*.txt"))
-        inbox_files = [f for f in inbox_files if not f.name.startswith(".")]
-
-        if inbox_files:
-            # [v2.7.23] Inbox 파일 안내
-            st.caption(f"💡 아래 파일을 선택하고 **🚀 인덱싱 시작**을 클릭하면 청킹 → 벡터화 → 인덱싱이 자동 진행됩니다.")
-            
-            # v2.6: 파일 선택 라디오 버튼
-            file_options = ["전체 처리"] + [f.name for f in inbox_files]
-            selected_file_name = st.radio(
-                "처리할 파일 선택",
-                options=file_options,
-                index=0,
-                horizontal=True,
-                key="inbox_file_selector"
-            )
-
-            col_status, col_idx, col_del = st.columns([2, 1, 1])
-            with col_status:
-                if selected_file_name == "전체 처리":
-                    st.info(f"📂 총 {len(inbox_files)}개의 파일이 대기 중입니다.")
-                else:
-                    st.success(f"📄 선택됨: {selected_file_name}")
-            
-            with col_idx:
-                # v2.5: Inbox 수동 인덱싱 버튼 (세션 상태로 트리거)
-                if st.button("🚀 인덱싱 시작", key="manual_index", use_container_width=True):
-                    st.session_state["run_indexing"] = True
-                    st.session_state["indexing_target"] = None if selected_file_name == "전체 처리" else str(INBOX_DIR / selected_file_name)
-            
-            with col_del:
-                # v2.7.21: 파일 삭제 버튼 (전체 처리가 아닐 때만 활성화)
-                if selected_file_name != "전체 처리":
-                    if st.button("🗑️ 삭제", key="delete_inbox_file", use_container_width=True, type="secondary"):
-                        try:
-                            file_to_delete = INBOX_DIR / selected_file_name
-                            file_to_delete.unlink()
-                            st.success(f"✅ 삭제 완료")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ 실패: {e}")
-                else:
-                    st.button("🗑️ 삭제", key="delete_disabled", use_container_width=True, disabled=True)
-            
-            # [v2.7.23] 칼럼 밖에서 파이프라인 실행 (전체 너비 진행률 표시)
-            if st.session_state.get("run_indexing"):
-                st.session_state["run_indexing"] = False
-                run_pipeline(chunk_size, overlap, st.session_state.get("indexing_target"))
-        else:
-            st.caption("비어있음")
-    else:
-        st.caption("폴더 없음")
+# ============================================================
+# 파일 업로드 페이지 (Cloud Edition - Disabled)
+# ============================================================
+# elif page == "📤 파일 업로드":
+#     st.error("⛔️ 클라우드 버전에서는 파일 업로드를 Colab에서 수행합니다.")
+#     st.info("Desktop/MS_Dev.nosync/Theology_AI_Lab_v4/01_Library/inbox 폴더에 파일을 넣고 Colab 인덱서를 실행하세요.")
 
 # ============================================================
 # 통계 페이지
@@ -1223,8 +1060,10 @@ elif page == "📊 통계":
         st.metric("📖 표제어", f"{lemma_count:,}개")
 
     with col3:
-        archive_files = list(ARCHIVE_DIR.glob("*.json")) if ARCHIVE_DIR.exists() else []
-        archive_files = [f for f in archive_files if not f.name.startswith("lemma_")]
+        # 보관된 청킹 JSON 문서 수 (인덱싱 완료된 도서)
+        archive_files = []
+        if ARCHIVE_DIR.exists():
+            archive_files = [f for f in ARCHIVE_DIR.glob("*.json") if not f.name.startswith("lemma_")]
         st.metric("📚 보관 문서", f"{len(archive_files)}권")
 
     st.markdown("---")
@@ -1382,12 +1221,12 @@ elif page == "📊 통계":
 
     # 경로 정보
     st.markdown("---")
-    st.markdown("### 📂 경로 정보")
+    st.markdown("### 📂 데이터 저장소 경로 (Google Drive Cloud)")
     st.code(f"""
-Inbox:   {INBOX_DIR}
-Archive: {ARCHIVE_DIR}
-DB:      {DB_PATH}
-""")
+[Local Inbox] : {INBOX_DIR}
+[Cloud Archive]: {ARCHIVE_DIR}
+[Cloud DB]     : {DB_PATH}
+""", language="text")
 
 # ============================================================
 # 설정 페이지
@@ -1525,6 +1364,123 @@ elif page == "⚙️ 설정":
     st.markdown("---")
 
     # ─────────────────────────────────────────────────────────
+    # 데이터 관리 (DB 초기화) [v4.3 추가]
+    # ─────────────────────────────────────────────────────────
+    st.markdown("### 🗑️ 데이터 관리")
+    st.caption(f"클라우드 벡터 데이터베이스({DB_PATH})를 초기화합니다.")
+    st.warning("⚠️ 주의: Google Drive와 동기화된 DB가 즉시 삭제됩니다. 신중하게 진행하세요!")
+    
+    col_reset1, col_reset2 = st.columns([1, 2])
+    with col_reset1:
+        if st.button("🧨 DB 초기화 (Reset)", type="primary", use_container_width=True):
+            try:
+                import shutil
+                
+                # 1. ChromaDB 삭제 (아카이브는 보존)
+                if DB_PATH.exists():
+                    shutil.rmtree(DB_PATH)
+                    st.toast("🧹 벡터 DB가 초기화되었습니다.", icon="🗑️")
+                
+                # 3. 폴더 재생성
+                DB_PATH.mkdir(parents=True, exist_ok=True)
+                
+                # 4. 캐시 무효화 (통계 즉시 반영)
+                st.cache_resource.clear()
+                st.cache_data.clear()
+                
+                st.success("✅ 초기화 완료! 이제 다시 인덱싱할 수 있습니다. (아카이브 파일은 보존됨)")
+                st.rerun() # 페이지 새로고침으로 통계 0 반영
+                
+            except Exception as e:
+                st.error(f"❌ 초기화 실패: {e}")
+
+    st.markdown("---")
+
+    # ─────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────
+    # 🚀 2. 구글 드라이브 클라우드 연결
+    # ─────────────────────────────────────────────────────────
+    st.markdown("### ☁️ 클라우드 연결 (필수)")
+    st.caption("구글 드라이브가 설치된 경로를 연결해야 정상 작동합니다.")
+
+    # 현재 설정된 경로가 유효한지 확인
+    is_path_valid = INBOX_DIR.exists() and DB_PATH.exists()
+    
+    if is_path_valid:
+        st.success(f"✅ 연결됨: `{INBOX_DIR.parent.parent}`")
+    else:
+        st.error("❌ 연결 안 됨: 경로 설정이 필요합니다.")
+    
+    with st.expander("📂 구글 드라이브 경로 설정 마법사", expanded=not is_path_valid):
+        st.info("💡 구글 드라이브 내 `Theology_AI_LAB` 폴더의 전체 경로를 입력해주세요.")
+        
+        # 기본값: 현재 경로가 절대경로라면 표시
+        current_root_str = str(INBOX_DIR.parent.parent) if str(INBOX_DIR).startswith("/") else ""
+        
+        cloud_root_input = st.text_input(
+            "Theology_AI_LAB 폴더 경로 (전체 경로)",
+            value=current_root_str,
+            placeholder="/Users/사용자/Library/CloudStorage/GoogleDrive-메일/내 드라이브/Theology_AI_LAB",
+            help="Finder에서 폴더를 선택하고 `⌥ Opt + ⌘ Cmd + C`를 누르면 경로가 복사됩니다."
+        )
+        
+        if st.button("🔄 경로 확인 및 연결"):
+            root_path = Path(cloud_root_input.strip().strip('"').strip("'"))
+            
+            # 검증: 필수 하위 폴더 존재 여부
+            check_inbox = root_path / "01_Library/inbox"
+            check_db = root_path / "02_Brain/vector_db"
+            
+            if check_inbox.exists() and check_db.exists():
+                # .env 업데이트 로직
+                try:
+                    env_lines = []
+                    if ENV_FILE.exists():
+                        env_lines = ENV_FILE.read_text(encoding='utf-8').splitlines()
+                    
+                    new_lines = []
+                    keys_updated = {"INBOX_DIR": False, "ARCHIVE_DIR": False, "DB_PATH": False}
+                    
+                    for line in env_lines:
+                        if line.startswith("INBOX_DIR="):
+                            new_lines.append(f"INBOX_DIR={check_inbox}")
+                            keys_updated["INBOX_DIR"] = True
+                        elif line.startswith("ARCHIVE_DIR="):
+                            new_lines.append(f"ARCHIVE_DIR={root_path}/01_Library/archive")
+                            keys_updated["ARCHIVE_DIR"] = True
+                        elif line.startswith("DB_PATH=") or line.startswith("CHROMA_DB_DIR="): # 구버전 호환
+                            new_lines.append(f"DB_PATH={check_db}")
+                            keys_updated["DB_PATH"] = True
+                        else:
+                            new_lines.append(line)
+                    
+                    # 없는 키 추가
+                    if not keys_updated["INBOX_DIR"]:
+                        new_lines.append(f"INBOX_DIR={check_inbox}")
+                    if not keys_updated["ARCHIVE_DIR"]:
+                        new_lines.append(f"ARCHIVE_DIR={root_path}/01_Library/archive")
+                    if not keys_updated["DB_PATH"]:
+                        new_lines.append(f"DB_PATH={check_db}")
+                        
+                    ENV_FILE.write_text("\n".join(new_lines), encoding='utf-8')
+                    
+                    st.toast("✅ 경로가 성공적으로 저장되었습니다!", icon="🎉")
+                    st.success("설정이 저장되었습니다. 적용을 위해 앱을 새로고침합니다.")
+                    time.sleep(1)
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"저장 중 오류 발생: {e}")
+            else:
+                st.warning("⚠️ 유효하지 않은 경로입니다.")
+                if not check_inbox.exists():
+                    st.markdown(f"- ❌ 찾을 수 없음: `{check_inbox}`")
+                if not check_db.exists():
+                    st.markdown(f"- ❌ 찾을 수 없음: `{check_db}`")
+                st.caption("폴더 구조가 `Theology_AI_LAB/01_Library/inbox` 형태인지 확인해주세요.")
+
+    st.markdown("---")
+
     # ─────────────────────────────────────────────────────────
     # 3. API 키 관리 (상시 노출, 간섭 방지)
     # ─────────────────────────────────────────────────────────
@@ -1685,83 +1641,38 @@ elif page == "⚙️ 설정":
             st.error(f"❌ 저장 실패: {e}")
 
     # ─────────────────────────────────────────────────────────
-    # RAG 사용 가이드
+    # 사용 가이드
     # ─────────────────────────────────────────────────────────
     st.markdown("---")
-    st.markdown("### 📖 RAG 사용 가이드")
-
-    with st.expander("Claude Desktop에서 사용하기", expanded=False):
-        st.markdown("""
-**1. MCP 서버 설정 (claude_desktop_config.json)**
-
-```json
-{
-  "mcpServers": {
-    "theology-lab": {
-      "command": "python",
-      "args": ["/path/to/03_System/server.py"],
-      "env": {
-        "ANTHROPIC_API_KEY": "your-api-key"
-      }
-    }
-  }
-}
-```
-
-**2. 사용 예시**
-- "은총에 대해 검색해줘"
-- "TRE에서 Gnade 항목 찾아줘"
-- "칭의론과 관련된 내용 요약해줘"
-        """)
-
-    with st.expander("API 직접 호출하기", expanded=False):
-        st.markdown("""
-**Python 예시:**
-
-```python
-import anthropic
-
-client = anthropic.Anthropic()
-
-# 1. 벡터 검색으로 관련 문서 찾기
-results = collection.query(
-    query_embeddings=[embedding],
-    n_results=5
-)
-
-# 2. RAG 프롬프트 생성
-context = "\\n".join(results["documents"][0])
-prompt = f\"\"\"다음 문서를 참고하여 질문에 답하세요:
-
-{context}
-
-질문: {user_question}
-\"\"\"
-
-# 3. Claude 호출
-response = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=4096,
-    messages=[{"role": "user", "content": prompt}]
-)
-```
-        """)
-
-    # ─────────────────────────────────────────────────────────
-    # GUI 사용 가이드
-    # ─────────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### 📖 GUI 사용 가이드")
+    st.markdown("### 📖 사용 가이드")
 
     GUI_GUIDE_PATH = KIT_ROOT / "docs" / "GUI_GUIDE.md"
-
-    with st.expander("전체 가이드 보기", expanded=False):
-        if GUI_GUIDE_PATH.exists():
+    
+    if GUI_GUIDE_PATH.exists():
+        with st.expander("Cloud Edition 사용 설명서 보기", expanded=False):
             guide_content = GUI_GUIDE_PATH.read_text(encoding="utf-8")
             st.markdown(guide_content)
-        else:
-            st.warning("⚠️ 가이드 파일을 찾을 수 없습니다.")
-            st.caption(f"예상 경로: {GUI_GUIDE_PATH}")
+    
+    # ─────────────────────────────────────────────────────────
+    # Claude Desktop 연동 (간략화)
+    # ─────────────────────────────────────────────────────────
+    with st.expander("🔗 Claude Desktop 연동 정보", expanded=False):
+        st.markdown("""
+        **MCP 서버 설정 (claude_desktop_config.json)**
+        
+        이 설정을 추가하면 Claude Desktop 앱에서 내 서재를 직접 검색할 수 있습니다.
+        """)
+        st.code(f'''{{
+  "mcpServers": {{
+    "theology-lab": {{
+      "command": "python",
+      "args": ["{str(KIT_ROOT / "03_System/server.py")}"],
+      "env": {{
+        "ANTHROPIC_API_KEY": "your-api-key"
+      }}
+    }}
+  }}
+}}''', language="json")
 
     # 현재 상태 표시
     st.markdown("---")

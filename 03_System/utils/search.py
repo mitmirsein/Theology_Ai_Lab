@@ -172,54 +172,57 @@ def vector_search(query: str, model, collection, n_results: int = 10,
 
 
 def hybrid_search(query: str, source: str = None, n_results: int = 5) -> List[Dict]:
-    """하이브리드 검색 (Vector + BM25)"""
+    """하이브리드 검색 (TheologySearcher v4 사용)"""
+    from pipeline.embedder import TheologyEmbedder
+    from pipeline.searcher import TheologySearcher
+    from langchain_chroma import Chroma
+    from langchain_core.documents import Document
     
-    # 1. 벡터 검색
-    model = SentenceTransformer('intfloat/multilingual-e5-base')
+    # 1. 컴포넌트 로드
+    embedder = TheologyEmbedder()
     
-    CHROMA_HOST = os.environ.get("CHROMA_HOST")
-    if CHROMA_HOST:
-        client = chromadb.HttpClient(host=CHROMA_HOST, port=8000)
-    else:
-        client = chromadb.PersistentClient(path=DB_PATH)
+    # Chroma DB 연결
+    vector_db = Chroma(
+        persist_directory=DB_PATH,
+        embedding_function=lambda x: embedder.embed_documents(x),
+        collection_name="theology_library"
+    )
     
+    searcher = TheologySearcher(vector_db)
+    
+    # 2. 하이브리드 인덱스 구축을 위해 전체 문서 로드 (CLI 환경이므로 실시간 구축)
     try:
-        collection = client.get_collection(name="theology_library")
-    except Exception:
-        collection = None
+        results = vector_db.get(include=["documents", "metadatas"])
+        if results and results["documents"]:
+            all_docs = [
+                Document(page_content=d, metadata=m) 
+                for d, m in zip(results["documents"], results["metadatas"])
+            ]
+            searcher.build_ensemble(all_docs, k=n_results)
+    except Exception as e:
+        print(f"⚠️ Hybrid Searcher 빌드 실패: {e}")
     
-    vector_results = []
-    if collection:
-        vector_results = vector_search(query, model, collection, n_results, source)
+    # 3. 검색 실행
+    raw_results = searcher.search(query)
     
-    # 2. BM25 검색
-    documents, metadatas, bm25 = load_bm25_corpus()
-    bm25_results = bm25_search(query, bm25, documents, metadatas, n_results)
-    
-    # 소스 필터링 (BM25)
-    if source and bm25_results:
-        bm25_results = [r for r in bm25_results 
-                        if source.lower() in r['metadata'].get('source', '').lower()]
-    
-    # 3. 결과 병합 (중복 제거)
-    seen_texts = set()
-    merged = []
-    
-    # 벡터 결과 우선
-    for r in vector_results:
-        text_key = r['text'][:100]
-        if text_key not in seen_texts:
-            seen_texts.add(text_key)
-            merged.append(r)
-    
-    # BM25 결과 추가
-    for r in bm25_results:
-        text_key = r['text'][:100]
-        if text_key not in seen_texts:
-            seen_texts.add(text_key)
-            merged.append(r)
-    
-    return merged[:n_results]
+    # 4. 소스 필터링 및 포맷 변환
+    output = []
+    for r in raw_results:
+        meta = r.metadata
+        if source and source.lower() not in meta.get('source', '').lower():
+            continue
+            
+        output.append({
+            "text": r.page_content,
+            "metadata": meta,
+            "score": 1.0,
+            "method": "hybrid"
+        })
+        
+        if len(output) >= n_results:
+            break
+            
+    return output
 
 
 def search(query: str, source: str = None, n_results: int = 5, output_json: bool = False):

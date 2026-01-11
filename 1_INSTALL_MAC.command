@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Theology AI Lab - One-Click Installer (Mac)
-# ===========================================
+# Theology AI Lab v4 - Cloud Edition Installer (Mac)
+# ==========================================================
 
 cd "$(dirname "$0")"
 
-echo "📦 Theology AI Lab 설치를 시작합니다..."
+echo "☁️  Theology AI Lab (Cloud Edition) 설치를 시작합니다..."
 
 # 1. Check Python 3.11 (Robust Loop)
 while ! command -v python3.11 &> /dev/null; do
@@ -20,6 +20,9 @@ echo "✅ Python 3.11 감지됨."
 
 # 2. Create Virtual Environment
 echo "🛠️  가상환경(Virtual Environment) 생성 중..."
+if [ -d "03_System/venv" ]; then
+    rm -rf 03_System/venv
+fi
 python3.11 -m venv 03_System/venv
 
 if [ ! -f "03_System/venv/bin/activate" ]; then
@@ -27,30 +30,50 @@ if [ ! -f "03_System/venv/bin/activate" ]; then
     exit 1
 fi
 
-# 3. Install Requirements
-echo "⬇️  AI 라이브러리 설치 중 (인터넷 속도에 따라 2~5분 소요)..."
+# 3. Install Requirements (from pyproject.toml)
+echo "⬇️  라이브러리 설치 중 (Viewer Mode)..."
 source 03_System/venv/bin/activate
 pip install --upgrade pip
-pip install -r 03_System/requirements.txt
 
-# 4. Setup .env
-echo "⚙️  환경 설정 완료 (.env)..."
-cat > .env << EOL
-DATA_ROOT=.
-CHROMA_DB_DIR=./02_Brain/vector_db
-ARCHIVE_DIR=./01_Library/archive
+# Install main dependencies (Lightweight Viewer)
+# pyproject.toml이 03_System 안에 있으므로 해당 경로 사용
+pip install -e ./03_System
+
+echo "✅ 라이브러리 설치 완료."
+
+# 4. Setup .env (Template)
+if [ ! -f ".env" ]; then
+    echo "⚙️  초기 설정 파일 생성 (.env)..."
+    cat > .env << EOL
+# [Google Drive Cloud Paths]
+# 동기화를 위해 구글 드라이브 내의 절대 경로로 수정하는 것을 권장합니다.
+# 예: /Users/yourname/Library/CloudStorage/GoogleDrive-email/...
 INBOX_DIR=./01_Library/inbox
-EOL
+ARCHIVE_DIR=./01_Library/archive
+DB_PATH=./02_Brain/vector_db
 
-# 5. Complete & Launch App
+# [AI API Keys]
+# ANTHROPIC_API_KEY=sk-...
+# OPENAI_API_KEY=sk-...
+# GOOGLE_API_KEY=AIza...
+
+# [Settings]
+APP_TITLE=Theology AI Lab (Cloud)
+EOL
+    echo "ℹ️  기본 설정이 적용되었습니다. 추후 Google Drive 연동을 위해 .env 경로를 수정하세요."
+else
+    echo "ℹ️  기존 .env 설정을 유지합니다."
+fi
+
+# 5. Complete & Launch
 echo ""
 echo "✅ =========================================="
 echo "   설치가 완료되었습니다!"
 echo "============================================"
 echo ""
-echo "🚀 연구소를 바로 실행합니다..."
-echo "   (브라우저가 자동으로 열립니다)"
+echo "🚀 연구소를 실행합니다..."
+echo "   잠시 후 브라우저가 열리면 http://localhost:8501 주소를 확인하세요."
 echo ""
 
-# Launch the app directly
+# Launch the app
 ./3_START_MAC.command
