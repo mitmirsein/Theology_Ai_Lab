@@ -18,3 +18,4 @@ __pycache__/
 *.code-workspace
 .env.bak
 .env.bak
+03_System/vault_history.json
