@@ -1,0 +1,25 @@
+# System
+.DS_Store
+*.log
+__pycache__/
+
+# Environment
+.env
+03_System/venv/
+
+# User Data (Exclude actual contents, keep folders)
+01_Library/inbox/*
+!01_Library/inbox/.gitkeep
+01_Library/archive/*
+!01_Library/archive/.gitkeep
+02_Brain/vector_db/
+
+# Workspace
+*.code-workspace
+.env.bak
+.env.bak
+03_System/vault_history.json
+
+# Exclusions
+theo
+Theology_AI_Lab_v4.0.0_Cloud.zip
