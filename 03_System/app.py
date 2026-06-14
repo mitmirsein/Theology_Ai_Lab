@@ -15,6 +15,7 @@ import sys
 import json
 import shutil
 import re
+import html
 import time
 from pathlib import Path
 from datetime import datetime
@@ -1010,14 +1011,17 @@ if page == "🔍 검색":
                     author = meta.get('author', '')
 
                     # 하이라이팅 처리 (단순 텍스트 교체)
-                    highlighted_doc = doc
+                    # 본문은 인덱싱된 외부 문서(PDF/EPUB/TXT)에서 온 신뢰할 수 없는 데이터이므로
+                    # 먼저 HTML 이스케이프하여 본문 내 악성 마크업(<script> 등) 실행을 차단한다.
+                    highlighted_doc = html.escape(doc)
                     if query:
-                        # 한국어/영어/독일어 키워드 강조
+                        # 한국어/영어/독일어 키워드 강조 (이스케이프된 본문 위에 적용)
                         keywords = query.split()
                         for kw in keywords:
                             if len(kw) > 1:
-                                pattern = re.compile(re.escape(kw), re.IGNORECASE)
-                                highlighted_doc = pattern.sub(f"<mark style='background-color: #FEF08A; border-radius: 2px; padding: 0 2px;'>{kw}</mark>", highlighted_doc)
+                                kw_escaped = html.escape(kw)
+                                pattern = re.compile(re.escape(kw_escaped), re.IGNORECASE)
+                                highlighted_doc = pattern.sub(f"<mark style='background-color: #FEF08A; border-radius: 2px; padding: 0 2px;'>{kw_escaped}</mark>", highlighted_doc)
 
                     # 카드 형식으로 표시
                     with st.expander(f"**[{i+1}] {source}** - p.{page_num} {f'| {lemma}' if lemma else ''}", expanded=(i==0)):

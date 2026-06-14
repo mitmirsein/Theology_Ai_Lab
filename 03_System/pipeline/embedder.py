@@ -30,10 +30,11 @@ class TheologyEmbedder:
         """Lazy loading of the model to save memory until needed."""
         if self.model is None:
             logger.info(f"🧠 Loading {self.model_name}...")
+            # bge-m3는 표준 XLM-RoBERTa 구조라 원격 코드 실행이 불필요하다.
+            # trust_remote_code=True는 모델 레포 변조 시 임의 코드 실행 경로가 되므로 사용하지 않는다.
             self.model = SentenceTransformer(
-                self.model_name, 
-                device=self.device,
-                trust_remote_code=True
+                self.model_name,
+                device=self.device
             )
             logger.info("✅ Model loaded successfully.")
 
